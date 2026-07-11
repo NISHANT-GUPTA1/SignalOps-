@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign in · AI Bug Triage &amp; Release Operator</title>
+<style>
+  :root {
+    --bg:#07080c; --panel:rgba(255,255,255,.03); --tx:#e6e9ef; --mut:#8b93a3;
+    --bd:rgba(255,255,255,.09); --acc:#6aa3ff; --acc2:#bf80ff;
+    --good:#46c08a; --bad:#e06363;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; }
+  body {
+    background:var(--bg); color:var(--tx);
+    font:15px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
+  }
+  #bg { position:fixed; inset:0; z-index:0; }
+
+  .wrap { position:relative; z-index:10; width:100%; max-width:410px; padding:24px; }
+  .brand {
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    font-weight:700; font-size:18px; margin-bottom:22px; letter-spacing:-.01em;
+  }
+  .card {
+    background:var(--panel); border:1px solid var(--bd); border-radius:18px;
+    padding:30px 28px; backdrop-filter:blur(14px);
+    box-shadow:0 20px 60px rgba(0,0,0,.45);
+  }
+  .tabs { display:flex; gap:6px; background:rgba(255,255,255,.04); border:1px solid var(--bd);
+          padding:4px; border-radius:11px; margin-bottom:22px; }
+  .tabs button {
+    flex:1; padding:9px; border:none; border-radius:8px; cursor:pointer;
+    background:transparent; color:var(--mut); font-weight:600; font-size:14px;
+    transition:all .15s ease;
+  }
+  .tabs button.active { background:linear-gradient(135deg,var(--acc),var(--acc2)); color:#04122e; }
+
+  label { display:block; font-size:12px; color:var(--mut); margin:14px 0 5px; }
+  input {
+    width:100%; background:rgba(255,255,255,.04); border:1px solid var(--bd);
+    color:var(--tx); border-radius:10px; padding:11px 13px; font:inherit;
+  }
+  input:focus { outline:none; border-color:var(--acc2); }
+  .submit {
+    width:100%; margin-top:22px; padding:12px; border:none; border-radius:10px;
+    background:#fff; color:#07080c; font-weight:700; font-size:15px; cursor:pointer;
+    transition:filter .15s ease;
+  }
+  .submit:hover { filter:brightness(.93); }
+  .submit:disabled { opacity:.6; cursor:not-allowed; }
+
+  .msg { margin-top:14px; font-size:13px; min-height:18px; text-align:center; }
+  .msg.err { color:var(--bad); }
+  .msg.ok { color:var(--good); }
+
+  .hint {
+    margin-top:18px; font-size:12px; color:var(--mut); text-align:center;
+    padding-top:16px; border-top:1px solid var(--bd);
+  }
+  .hint code { color:#c3cad6; background:rgba(255,255,255,.05); padding:1px 6px; border-radius:5px; }
+  .back { display:block; text-align:center; margin-top:16px; font-size:13px; color:var(--mut); text-decoration:none; }
+  .back:hover { color:var(--tx); }
+  .spinner { display:inline-block; width:13px; height:13px; border:2px solid rgba(0,0,0,.25);
+             border-top-color:#07080c; border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+
+<div class="wrap">
+  <div class="brand">🐞 Bug Triage Operator</div>
+  <div class="card">
+    <div class="tabs">
+      <button id="tab-in" class="active" onclick="setMode('in')">Sign in</button>
+      <button id="tab-up" onclick="setMode('up')">Sign up</button>
+    </div>
+
+    <form id="form" onsubmit="return submitForm(event)">
+      <div id="email-row" style="display:none">
+        <label>Email</label>
+        <input id="email" type="email" placeholder="you@company.com" autocomplete="email" />
+      </div>
+
+      <label id="user-label">Username or email</label>
+      <input id="user" placeholder="you@company.com" autocomplete="username" />
+
+      <label>Password</label>
+      <input id="pass" type="password" placeholder="••••••••" autocomplete="current-password" />
+
+      <button id="submit" class="submit" type="submit">Sign in</button>
+      <div id="msg" class="msg"></div>
+    </form>
+
+    <div class="hint" id="hint">
+      New here? <a href="#" onclick="setMode('up');return false;" style="color:var(--acc)">Create an account</a> to get started.
+    </div>
+  </div>
+  <a class="back" href="/">← Back to home</a>
+</div>
+
+<script>
+let mode = 'in';
+const next = new URLSearchParams(location.search).get('next') || '/app';
+
+function setMode(m) {
+  mode = m;
+  const up = m === 'up';
+  document.getElementById('tab-in').classList.toggle('active', !up);
+  document.getElementById('tab-up').classList.toggle('active', up);
+  document.getElementById('email-row').style.display = up ? 'block' : 'none';
+  document.getElementById('user-label').textContent = up ? 'Username' : 'Username or email';
+  document.getElementById('user').placeholder = up ? 'pick a username' : 'you@company.com';
+  document.getElementById('pass').setAttribute('autocomplete', up ? 'new-password' : 'current-password');
+  document.getElementById('submit').textContent = up ? 'Create account' : 'Sign in';
+  document.getElementById('hint').style.display = up ? 'none' : 'block';
+  msg('');
+}
+
+function msg(text, kind) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+}
+
+async function submitForm(e) {
+  e.preventDefault();
+  const btn = document.getElementById('submit');
+  const user = document.getElementById('user').value.trim();
+  const pass = document.getElementById('pass').value;
+  const email = document.getElementById('email').value.trim();
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span>';
+  try {
+    if (mode === 'up') {
+      const r = await fetch('/api/auth/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, username: user, password: pass }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.detail || 'Registration failed');
+      msg('Account created — signing you in…', 'ok');
+    }
+    // login (also runs right after a successful signup)
+    const r2 = await fetch('/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: user, password: pass }),
+    });
+    const d2 = await r2.json();
+    if (!r2.ok) throw new Error(d2.detail || 'Login failed');
+    msg('Welcome, ' + d2.username + '!', 'ok');
+    location.href = next;
+  } catch (err) {
+    msg(err.message, 'err');
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+  return false;
+}
+
+// ---- background particle field (matches the landing hero) ----
+(function () {
+  const canvas = document.getElementById('bg');
+  const ctx = canvas.getContext('2d');
+  let particles = [];
+  const mouse = { x: null, y: null, radius: 150 };
+  class P {
+    constructor(x, y, dx, dy, s) { this.x = x; this.y = y; this.dx = dx; this.dy = dy; this.s = s; }
+    draw() { ctx.beginPath(); ctx.arc(this.x, this.y, this.s, 0, Math.PI * 2); ctx.fillStyle = 'rgba(150,180,255,0.8)'; ctx.fill(); }
+    update() {
+      if (this.x > canvas.width || this.x < 0) this.dx = -this.dx;
+      if (this.y > canvas.height || this.y < 0) this.dy = -this.dy;
+      if (mouse.x !== null) {
+        const ax = mouse.x - this.x, ay = mouse.y - this.y, d = Math.sqrt(ax * ax + ay * ay);
+        if (d < mouse.radius && d > 0) { const f = (mouse.radius - d) / mouse.radius; this.x -= (ax / d) * f * 3; this.y -= (ay / d) * f * 3; }
+      }
+      this.x += this.dx; this.y += this.dy; this.draw();
+    }
+  }
+  function init() {
+    particles = [];
+    const n = Math.min(120, (canvas.width * canvas.height) / 12000);
+    for (let i = 0; i < n; i++) {
+      const s = Math.random() * 1.6 + 1;
+      particles.push(new P(Math.random() * canvas.width, Math.random() * canvas.height, (Math.random() * .4) - .2, (Math.random() * .4) - .2, s));
+    }
+  }
+  function connect() {
+    for (let a = 0; a < particles.length; a++) for (let b = a; b < particles.length; b++) {
+      const dx = particles[a].x - particles[b].x, dy = particles[a].y - particles[b].y, d2 = dx * dx + dy * dy;
+      if (d2 < (canvas.width / 8) * (canvas.height / 8)) {
+        const op = 1 - d2 / 20000; if (op <= 0) continue;
+        ctx.strokeStyle = 'rgba(150,140,230,' + (op * .5) + ')'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(particles[a].x, particles[a].y); ctx.lineTo(particles[b].x, particles[b].y); ctx.stroke();
+      }
+    }
+  }
+  function animate() { requestAnimationFrame(animate); ctx.clearRect(0, 0, canvas.width, canvas.height); for (const p of particles) p.update(); connect(); }
+  function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; init(); }
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', (e) => { mouse.x = e.clientX; mouse.y = e.clientY; });
+  window.addEventListener('mouseout', () => { mouse.x = null; mouse.y = null; });
+  resize(); animate();
+})();
+</script>
+</body>
+</html>

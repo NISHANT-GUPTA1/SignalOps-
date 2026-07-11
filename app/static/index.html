@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Bug Triage &amp; Release Operator</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --bd:#2a2f3a; --tx:#e6e9ef;
+          --mut:#8b93a3; --acc:#6aa3ff; --good:#46c08a; --warn:#e0a23c; --bad:#e06363; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx); font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--bd); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  .pill { font-size:11px; padding:2px 8px; border-radius:999px; border:1px solid var(--bd); color:var(--mut); }
+  .pill.on { color:var(--good); border-color:var(--good); }
+  .pill.off { color:var(--mut); }
+  main { max-width:1100px; margin:0 auto; padding:24px; display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .full { grid-column:1 / -1; }
+  .card { background:var(--panel); border:1px solid var(--bd); border-radius:12px; padding:18px; }
+  .card h2 { margin:0 0 12px; font-size:15px; }
+  label { display:block; font-size:12px; color:var(--mut); margin:10px 0 4px; }
+  textarea, input, select { width:100%; background:var(--panel2); border:1px solid var(--bd); color:var(--tx);
+            border-radius:8px; padding:9px 11px; font:inherit; }
+  textarea { min-height:150px; resize:vertical; }
+  button { background:var(--acc); color:#04122e; border:none; border-radius:8px; padding:9px 16px;
+           font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--tx); border:1px solid var(--bd); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  .row > * { flex:1; }
+  .muted { color:var(--mut); font-size:12px; }
+  .badge { display:inline-block; padding:2px 9px; border-radius:6px; font-size:12px; font-weight:600; }
+  .P0,.critical { background:#3a1414; color:#ff8d8d; } .P1,.high { background:#3a2a12; color:#ffc266; }
+  .P2,.medium { background:#13313a; color:#73d0e6; } .P3,.low { background:#1a2a1c; color:#8fe0a8; }
+  .kv { display:grid; grid-template-columns:120px 1fr; gap:6px 12px; margin:10px 0; }
+  .kv div:nth-child(odd) { color:var(--mut); }
+  ol,ul { margin:6px 0; padding-left:20px; }
+  .dup { background:var(--panel2); border:1px solid var(--bd); border-radius:8px; padding:10px; margin:6px 0; }
+  .ctx { font-size:12px; border-left:2px solid var(--bd); padding:4px 10px; margin:6px 0; color:var(--mut); }
+  .ctx b { color:var(--tx); }
+  pre { background:var(--panel2); padding:14px; border-radius:8px; overflow:auto; white-space:pre-wrap; }
+  .spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--bd); border-top-color:var(--acc);
+             border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .err { color:var(--bad); }
+  .ok { color:var(--good); }
+  .chips span { display:inline-block; background:var(--panel2); border:1px solid var(--bd); border-radius:999px;
+                padding:1px 9px; margin:2px; font-size:11px; }
+  a { color:var(--acc); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐞 AI Bug Triage &amp; Release Operator</h1>
+  <span id="st-llm" class="pill">LLM</span>
+  <span id="st-embed" class="pill">embeddings</span>
+  <span id="st-vdb" class="pill">vector DB</span>
+  <span id="st-gh" class="pill">GitHub write</span>
+  <span id="st-slack" class="pill">Slack</span>
+  <span id="st-plane" class="pill">Plane</span>
+  <span id="st-store" class="pill">store</span>
+  <a id="logout" href="#" style="margin-left:auto; font-size:12px; color:var(--mut);">Sign out</a>
+</header>
+<script>
+  document.getElementById('logout').addEventListener('click', async (e) => {
+    e.preventDefault();
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+    location.href = '/';
+  });
+</script>
+
+<main>
+  <!-- INGEST -->
+  <section class="card full">
+    <h2>1 · Connect a GitHub repo (real — ingest issues + docs first)</h2>
+    <div class="row">
+      <div>
+        <label>Repo URL or owner/repo (private repos work with a GITHUB_TOKEN)</label>
+        <input id="repo" placeholder="e.g. your-org/your-repo or https://github.com/your-org/your-repo" />
+      </div>
+      <div style="flex:0 0 130px">
+        <label>State</label>
+        <select id="ing-state"><option>all</option><option>open</option><option>closed</option></select>
+      </div>
+      <div style="flex:0 0 110px">
+        <label>Limit</label>
+        <input id="ing-limit" type="number" value="40" />
+      </div>
+      <div style="flex:0 0 auto"><button id="btn-ingest">Ingest issues</button></div>
+    </div>
+    <p id="ing-out" class="muted"></p>
+  </section>
+
+  <!-- TRIAGE INPUT -->
+  <section class="card">
+    <h2>2 · Drop a messy bug report</h2>
+    <div id="slack-panel" style="display:none; margin-bottom:14px; padding:12px; border:1px solid var(--bd); border-radius:8px; background:var(--panel2)">
+      <div class="row" style="align-items:end">
+        <div><label>Pull from a Slack channel (read-only)</label>
+          <select id="slack-channel"></select></div>
+        <div style="flex:0 0 auto"><button id="btn-slack-load" class="ghost">Load messages</button></div>
+      </div>
+      <div id="slack-messages" class="muted" style="margin-top:8px"></div>
+    </div>
+    <div class="row">
+      <div style="flex:0 0 150px">
+        <label>Source</label>
+        <select id="src"><option>slack</option><option>email</option><option>form</option><option>github</option><option>other</option></select>
+      </div>
+      <div>
+        <label>Reporter (optional)</label>
+        <input id="reporter" placeholder="@jane" />
+      </div>
+    </div>
+    <label>Raw report</label>
+    <textarea id="raw" placeholder="Paste a real, messy bug report here — e.g. a Slack message, an email, or form text. The agent will search your ingested repo for duplicates and triage it."></textarea>
+    <div style="margin-top:12px"><button id="btn-triage">🤖 Triage</button></div>
+    <p id="tr-status" class="muted"></p>
+  </section>
+
+  <!-- TRIAGE RESULT -->
+  <section class="card">
+    <h2>3 · Triaged issue</h2>
+    <div id="result"><p class="muted">Run a triage to see the structured, de-duplicated issue here.</p></div>
+  </section>
+
+  <!-- RELEASE NOTES -->
+  <section class="card full">
+    <h2>4 · Generate release notes from resolved issues</h2>
+    <div class="row">
+      <div><label>Repo (uses closed issues in the store; falls back to seed data)</label>
+        <input id="rn-repo" placeholder="owner/repo (optional)" /></div>
+      <div style="flex:0 0 auto"><button id="btn-rn" class="ghost">📝 Generate release notes</button></div>
+    </div>
+    <div id="rn-out"></div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let lastTriage = null;
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(()=>({}));
+  if (!r.ok) throw new Error(data.detail || ('HTTP '+r.status));
+  return data;
+}
+
+function setPill(el, on, text) {
+  el.textContent = text; el.classList.toggle('on', on); el.classList.toggle('off', !on);
+}
+
+async function loadStatus() {
+  try {
+    const s = await api('/api/status');
+    const llm = s.llm || {};
+    const active = llm.active_provider && llm.active_provider !== 'none';
+    setPill($('#st-llm'), active, active ? 'LLM: '+llm.active_provider+(llm.model?' / '+llm.model:'') : 'LLM: none');
+    setPill($('#st-embed'), s.embeddings_real, 'embeddings: '+s.embedding_provider+(s.embeddings_real?'':' (degraded)'));
+    setPill($('#st-vdb'), true, s.vector_db);
+    setPill($('#st-gh'), s.github_write, s.github_write ? 'GitHub: write' : 'GitHub: read-only');
+    setPill($('#st-slack'), s.slack, s.slack ? 'Slack: connected' : 'Slack: not set');
+    setPill($('#st-plane'), s.plane_live, s.plane_live ? 'Plane: live' : 'Plane: not set');
+    setPill($('#st-store'), true, 'store: '+s.store.total+' chunks');
+    if (s.slack && !window._slackInit) { window._slackInit = true; initSlack(); }
+  } catch(e) { console.error(e); }
+}
+
+async function initSlack() {
+  $('#slack-panel').style.display = 'block';
+  try {
+    const d = await api('/api/slack/channels');
+    $('#slack-channel').innerHTML = d.channels.map(c =>
+      `<option value="${esc(c.id)}">#${esc(c.name)}${c.is_member?'':' (invite bot first)'}</option>`).join('');
+  } catch(e) { $('#slack-messages').innerHTML = '<span class="err">'+e.message+'</span>'; }
+}
+
+async function loadSlackMessages() {
+  const ch = $('#slack-channel').value;
+  if (!ch) return;
+  $('#slack-messages').innerHTML = '<span class="spinner"></span> loading…';
+  try {
+    const d = await api('/api/slack/messages?channel_id='+encodeURIComponent(ch)+'&limit=15');
+    if (!d.messages.length) { $('#slack-messages').innerHTML = '<span class="muted">No messages — is the bot invited to this channel? (/invite @your-bot)</span>'; return; }
+    window._slackMsgs = d.messages;
+    $('#slack-messages').innerHTML = d.messages.map((m,i) =>
+      `<div class="dup"><b>${esc(m.user)}</b><br><span class="muted">${esc(m.text.slice(0,240))}</span><br>
+       <button class="ghost slack-use" data-i="${i}" style="margin-top:6px">Use this →</button></div>`).join('');
+    document.querySelectorAll('.slack-use').forEach(b => b.onclick = () => useSlackMessage(+b.dataset.i));
+  } catch(e) { $('#slack-messages').innerHTML = '<span class="err">'+e.message+'</span>'; }
+}
+
+function useSlackMessage(i) {
+  const m = window._slackMsgs[i];
+  $('#raw').value = m.text;
+  $('#src').value = 'slack';
+  $('#reporter').value = m.user;
+  $('#raw').scrollIntoView({behavior:'smooth', block:'center'});
+}
+if ($('#btn-slack-load')) $('#btn-slack-load').onclick = loadSlackMessages;
+
+$('#btn-ingest').onclick = async () => {
+  const repo = $('#repo').value.trim();
+  if (!repo) return;
+  $('#btn-ingest').disabled = true;
+  $('#ing-out').innerHTML = '<span class="spinner"></span> starting ingest…';
+  try {
+    // Kick off a background job (returns immediately — no long request, so no
+    // reverse-proxy / Cloudflare 524 timeout), then poll it for progress.
+    const start = await api('/api/ingest', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({repo_url: repo, state: $('#ing-state').value, limit: +$('#ing-limit').value})});
+    const jobId = start.job_id;
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      const j = await api('/api/ingest/status/' + jobId);
+      if (j.status === 'starting') {
+        $('#ing-out').innerHTML = '<span class="spinner"></span> fetching from GitHub…';
+      } else if (j.status === 'embedding') {
+        $('#ing-out').innerHTML = '<span class="spinner"></span> embedding ' +
+          (j.embedded || 0) + '/' + (j.total_chunks || '?') + ' chunks…';
+      } else if (j.status === 'done') {
+        $('#ing-out').innerHTML = '<span class="ok">✓ ' + j.message + '</span> Total in store: ' + j.total_in_store;
+        if (!$('#rn-repo').value) $('#rn-repo').value = repo;
+        loadStatus();
+        break;
+      } else if (j.status === 'error') {
+        $('#ing-out').innerHTML = '<span class="err">' + j.error + '</span>';
+        break;
+      }
+    }
+  } catch(e) { $('#ing-out').innerHTML = '<span class="err">'+e.message+'</span>'; }
+  $('#btn-ingest').disabled = false;
+};
+
+$('#btn-triage').onclick = async () => {
+  const raw = $('#raw').value.trim();
+  if (!raw) return;
+  $('#btn-triage').disabled = true;
+  $('#tr-status').innerHTML = '<span class="spinner"></span> The agent is searching for duplicates and triaging…';
+  $('#result').innerHTML = '';
+  try {
+    const d = await api('/api/triage', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({raw_text: raw, source: $('#src').value, reporter: $('#reporter').value || null})});
+    lastTriage = d.triage;
+    renderResult(d);
+    $('#tr-status').textContent = '';
+  } catch(e) { $('#tr-status').innerHTML = '<span class="err">'+e.message+'</span>'; }
+  $('#btn-triage').disabled = false;
+};
+
+function renderResult(d) {
+  const t = d.triage;
+  const dups = (t.duplicate_candidates||[]).map(x =>
+    `<div class="dup"><b>${esc(x.id)}</b> · ${esc(x.title)} <span class="badge ${x.confidence}">${x.confidence}</span><br>
+     <span class="muted">${esc(x.reason)}</span></div>`).join('') || '<span class="muted">None found.</span>';
+  const ctx = (d.retrieved||[]).map(c =>
+    `<div class="ctx"><b>${esc(c.title)}</b> <span class="muted">(${esc(c.source)} · score ${c.score})</span><br>${esc(c.snippet)}</div>`).join('');
+  const searches = (d.agent_searches||[]).map(esc).join(' · ') || '(used initial retrieval only)';
+
+  $('#result').innerHTML = `
+    <h3 style="margin:0 0 6px">${esc(t.title)}</h3>
+    <span class="badge ${t.priority}">${t.priority}</span>
+    <span class="badge ${t.severity}">${esc(t.severity)}</span>
+    <span class="badge">${esc(t.type)}</span>
+    <div class="kv">
+      <div>Priority why</div><div>${esc(t.priority_reason)}</div>
+      <div>Components</div><div>${(t.components||[]).join(', ')||'—'}</div>
+      <div>Labels</div><div class="chips">${(t.labels||[]).map(l=>`<span>${esc(l)}</span>`).join('')||'—'}</div>
+    </div>
+    <p>${esc(t.summary)}</p>
+    ${t.reproduction_steps?.length?`<b>Steps to reproduce</b><ol>${t.reproduction_steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol>`:''}
+    ${t.expected_behavior?`<b>Expected:</b> ${esc(t.expected_behavior)}<br>`:''}
+    ${t.actual_behavior?`<b>Actual:</b> ${esc(t.actual_behavior)}`:''}
+    <h4>Possible duplicates</h4>${dups}
+    <h4>Next action</h4><p class="muted">${esc(t.suggested_next_action||'—')}</p>
+    <details><summary class="muted">Retrieval trace — agent searches: ${searches}</summary>${ctx}</details>
+    <div class="row" style="margin-top:14px">
+      <div style="flex:0 0 auto"><button id="cr-plane" class="ghost">→ Create in Plane</button></div>
+      <div style="flex:0 0 auto"><button id="cr-gh" class="ghost">→ Create in GitHub</button></div>
+      <div><span id="cr-out" class="muted"></span></div>
+    </div>`;
+  $('#cr-plane').onclick = () => createIssue('plane');
+  $('#cr-gh').onclick = () => createIssue('github');
+}
+
+async function createIssue(target) {
+  const out = $('#cr-out');
+  out.innerHTML = '<span class="spinner"></span>';
+  try {
+    const body = {triage: lastTriage, target};
+    if (target==='github') {
+      const repo = $('#repo').value.trim();
+      if (!repo) { out.innerHTML = '<span class="err">Enter a repo URL above first.</span>'; return; }
+      body.repo_url = repo;
+    }
+    const d = await api('/api/create-issue', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    out.innerHTML = `<span class="ok">✓ ${esc(d.message)}</span> ${d.url?`· <a href="${esc(d.url)}" target="_blank">open</a>`:''}`;
+  } catch(e) { out.innerHTML = '<span class="err">'+e.message+'</span>'; }
+}
+
+$('#btn-rn').onclick = async () => {
+  const repo = $('#rn-repo').value.trim() || $('#repo').value.trim();
+  if (!repo) { $('#rn-out').innerHTML = '<span class="err">Enter a repo (and ingest it with closed issues first).</span>'; return; }
+  $('#rn-out').innerHTML = '<span class="spinner"></span> generating…';
+  try {
+    const d = await api('/api/release-notes', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({repo_url: repo, limit: 30})});
+    $('#rn-out').innerHTML = '<p class="muted">From '+d.issue_count+' resolved issues:</p><pre>'+esc(d.markdown)+'</pre>';
+  } catch(e) { $('#rn-out').innerHTML = '<span class="err">'+e.message+'</span>'; }
+};
+
+function esc(s){ return String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+loadStatus();
+</script>
+</body>
+</html>

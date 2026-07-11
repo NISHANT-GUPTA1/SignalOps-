@@ -1,0 +1,16 @@
+# Core API + agent
+anthropic>=0.69
+fastapi>=0.115
+uvicorn[standard]>=0.30
+requests>=2.32
+python-dotenv>=1.0
+numpy>=2.0
+
+# LLM providers: the Anthropic SDK powers the Claude tier; the OpenAI-compatible
+# and local-Ollama tiers use plain `requests` (no extra package). Ollama itself is
+# an external local install (https://ollama.com), not a pip dependency.
+
+# Vector database (Phase 2). Qdrant in LOCAL/embedded mode — a real vector DB
+# with HNSW ANN, no Docker required, and (unlike chromadb 1.5.x) it does NOT
+# segfault on Python 3.14. Set QDRANT_URL to point at Qdrant Cloud/Docker instead.
+qdrant-client>=1.12

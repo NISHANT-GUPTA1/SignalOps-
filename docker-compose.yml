@@ -1,0 +1,52 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile   # capital D — matches the tracked filename (Linux is case-sensitive)
+    image: bug-triage:latest
+    container_name: bug-triage
+    restart: unless-stopped
+    ports:
+      # 8077 is free on this VPS. Bound to 127.0.0.1 (like your other containers)
+      # so it's reachable locally / via nginx, not exposed raw to the internet.
+      - "127.0.0.1:8077:8077"
+    # API keys and provider config come from your .env (copy from .env.example).
+    env_file:
+      - .env
+    environment:
+      # Persist Qdrant local store + ingested data on the mounted volume
+      DATA_DIR: /app/data
+      QDRANT_PATH: /app/data/qdrant
+      # Embeddings run on the Ollama server BUNDLED inside this image (see
+      # Dockerfile) — free, local, no rate limits. It listens on localhost
+      # inside the container, so no separate service is needed.
+      EMBEDDING_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://localhost:11434/v1
+      OLLAMA_EMBED_MODEL: nomic-embed-text
+    volumes:
+      - bug-triage-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8077/api/status')\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Ollama + the app both start here; give them room to boot.
+      start_period: 60s
+
+  # ── Optional: run Qdrant as a real server instead of embedded local mode ──
+  # Enable with:  docker compose --profile qdrant up -d
+  # Then set in .env:  QDRANT_URL=http://qdrant:6333
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: bug-triage-qdrant
+    profiles: ["qdrant"]
+    restart: unless-stopped
+    expose:
+      - "6333"
+      - "6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+
+volumes:
+  bug-triage-data:
+  qdrant-storage:

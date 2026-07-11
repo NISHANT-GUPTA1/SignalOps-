@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Local data (Qdrant store, ingested chunks) — keep out of the image; use a volume
+data/
+
+# Secrets & env
+.env
+
+# Tooling / VCS
+.git/
+.gitignore
+.vscode/
+.idea/
+*.md
