@@ -1,6 +1,14 @@
 .venv/
+venv/
 __pycache__/
 *.pyc
 .env
 data/
 *.log
+
+# Personal / submission docs — kept local, not published
+SUBMISSION.md
+SUBMISSION_CHECKLIST.md
+DEMO_SCRIPT.md
+SLACK.md
+bug-tracker.md

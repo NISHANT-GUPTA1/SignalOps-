@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from . import agent, auth
 from .chunking import chunk_text
 from .config import settings
+from .formatting import issue_body as _issue_body
 from .integrations import github_client, plane_client, slack_client
 from .llm import describe as describe_llm
 from .llm import get_active_provider
@@ -97,33 +98,6 @@ def triage(req: TriageRequest) -> TriageResponse:
         return agent.triage(req.raw_text, source=req.source, reporter=req.reporter)
     except Exception as exc:
         raise HTTPException(500, f"Triage failed: {exc}")
-
-
-def _issue_body(t: TriagedIssue) -> str:
-    lines = [t.summary, ""]
-    if t.reproduction_steps:
-        lines.append("### Steps to reproduce")
-        lines += [f"{i}. {s}" for i, s in enumerate(t.reproduction_steps, 1)]
-        lines.append("")
-    if t.expected_behavior:
-        lines += ["### Expected", t.expected_behavior, ""]
-    if t.actual_behavior:
-        lines += ["### Actual", t.actual_behavior, ""]
-    lines += [
-        "### Triage",
-        f"- **Type:** {t.type}",
-        f"- **Priority:** {t.priority} — {t.priority_reason}",
-        f"- **Severity:** {t.severity}",
-        f"- **Components:** {', '.join(t.components) or 'n/a'}",
-    ]
-    if t.duplicate_candidates:
-        lines += ["", "### Possible duplicates"]
-        for d in t.duplicate_candidates:
-            lines.append(f"- `{d.id}` {d.title} — {d.confidence} ({d.reason})")
-    if t.suggested_next_action:
-        lines += ["", "### Suggested next action", t.suggested_next_action]
-    lines += ["", "_Filed by AI Bug Triage & Release Operator._"]
-    return "\n".join(lines)
 
 
 @app.post("/api/create-issue", response_model=CreateIssueResponse)

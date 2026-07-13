@@ -1,129 +1,184 @@
-#  AI Bug Triage & Release Operator
+# AI Bug Triage — a Slack Agent
 
-An **industry-internal engineering tool** and a **genuine RAG + agentic-AI** showcase. Drop a messy
-bug report (Slack / email / form / GitHub) and an AI agent turns it into a clean, **prioritized,
-de-duplicated** engineering issue — with reproduction steps — then files it to **GitHub** (incl.
-private repos) or a **Plane** board, and drafts **release notes** from resolved issues.
+Paste any messy bug report into Slack and an AI agent turns it into a clean, **prioritized,
+de-duplicated** engineering issue — with reproduction steps — then files it to **GitHub** (private
+repos included) or a **Plane** board with one click. It also drafts **release notes** from resolved
+issues.
 
-Everything is real: real LLM (Claude Opus 4.8), real embeddings (Voyage), real vector DB (Qdrant),
-real ingestion from your actual repo. **No mocks, no seed data, no hardcoded fixtures** — the
-knowledge base is whatever you ingest.
+The agent lives **inside Slack**: a slash command, a message shortcut, an `@mention`, and the native
+**AI Assistant panel**. The brain is a genuine **agentic-RAG** loop (Claude Opus 4.8, hybrid
+vector + keyword search over a Qdrant DB) grounded in your team's real issue history — no mocks, no
+seed data.
+
+> Built for the **Slack Agent Builder Challenge** · Track: **New Slack Agent**.
 
 ---
 
-## How it maps to the GenAI / RAG learning roadmap
+## What it does
 
-| Phase | Concept | Where it lives |
-|---|---|---|
-| 1 — LLMs | Next-token model, tool use, structured output | `app/agent.py` (Claude Opus 4.8) |
-| 2 — Embeddings & Vector DBs | Embeddings, similarity, **ANN/HNSW**, vector DB | `app/embeddings.py` (Voyage), `app/vectorstore.py` (**Qdrant**) |
-| 3 — RAG | **Chunking**, indexing, retrievers, **BM25 vs semantic**, **hybrid search**, **RRF**, grounding | `app/chunking.py`, `VectorStore.search()` |
-| 4 — Orchestration | Document loaders, splitters, retrieval pipeline | `/api/ingest` (GitHub issues + repo markdown → chunk → embed → index) |
-| 5 — Agents | Tool use / function calling, **agentic RAG** (model issues its own searches), task decomposition | `app/agent.py` tool loop |
-| 6 — Production | Serving, config, observability of retrieval trace | FastAPI app, `/api/status`, retrieval trace in UI |
+- **Turns raw reports into proper issues** — title, summary, reproduction steps, expected vs. actual.
+- **Prioritizes automatically** — P0–P3 + severity, each with a stated reason.
+- **Catches duplicates before filing** — checks every report against your existing issues.
+- **Files with one click** — a *File to GitHub / Plane* button creates the real issue; the card updates to ✅.
+- **Writes release notes** — `/release-notes` turns resolved issues into a changelog.
+- **Grounded in your real history** — every decision cites your team's own past issues.
+
+## The four ways to use it in Slack
+
+| You do this | It does this |
+|---|---|
+| `/triage <paste report>` | Posts an interactive triage card to the channel |
+| Hover a message → **⚡ Triage this** | Triages that exact message in a thread |
+| `@BugTriage <report>` | Triages in a channel thread |
+| Open the **AI Assistant panel** and paste | Chat-style triage, back in the thread |
+
+## Challenge technologies used (two of the three)
+
+| Pillar | How it's used |
+|---|---|
+| **Slack AI capabilities** | Native **AI Assistant panel** (Agents & AI Apps) — suggested prompts, live status, threaded replies. |
+| **MCP server integration** | The engine is published as an **MCP server** (`python -m app.mcp_server`) with tools `triage_report`, `search_issues`, `file_issue`, `release_notes`. |
+
+---
+
+## Quick start
+
+### 1. Install
+```bash
+python -m venv venv
+venv\Scripts\activate            # Windows;  source venv/bin/activate on macOS/Linux
+pip install -r requirements.txt
+cp .env.example .env             # then edit .env (see keys below)
+```
+
+### 2. Create the Slack app
+- Go to <https://api.slack.com/apps> → **Create New App** → **From a manifest** → paste
+  [`slack_manifest.yaml`](slack_manifest.yaml).
+- **Basic Information → App-Level Tokens** → generate a token with scope `connections:write` →
+  `SLACK_APP_TOKEN` (`xapp-…`).
+- **Install App** → copy the **Bot User OAuth Token** → `SLACK_BOT_TOKEN` (`xoxb-…`).
+- Ensure **Settings → Socket Mode** is **On**.
+
+### 3. Configure `.env`
+```ini
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+ANTHROPIC_API_KEY=sk-ant-...       # the AI brain (or OPENAI_COMPAT_* / local Ollama)
+GITHUB_TOKEN=ghp_...               # to file issues (private-repo capable)
+GITHUB_REPO_URL=owner/name         # default repo to file into
+EMBEDDING_PROVIDER=voyage          # or ollama (free, local) or hash (offline)
+VOYAGE_API_KEY=...                 # if using voyage
+```
+
+### 4. Seed the knowledge base (so dedup + grounding work)
+Ingest a repo's issue history once via the web console:
+```bash
+uvicorn app.main:app --port 8077   # open http://127.0.0.1:8077/app → Ingest a repo
+```
+
+### 5. Run the Slack agent
+```bash
+python run_slack.py
+```
+When you see `⚡️ Slack agent connected`, invite the bot to a channel (`/invite @BugTriage`) and try
+`/triage <a bug report>`.
+
+> Only one `run_slack.py` at a time — embedded Qdrant locks the store to a single process.
 
 ---
 
 ## Architecture
 
 ```
-Raw report ─▶ FastAPI ─▶ Agent (Claude Opus 4.8, adaptive thinking)
-                          │  ├─ tool: search_existing_issues ─▶ Qdrant hybrid (dense HNSW + BM25, fused by RRF)
-                          │  └─ tool: submit_triage (strict structured output)  ◀── ends the loop
-                          ▼
-                 Triaged issue ─▶ GitHub (real, private-repo capable)  or  Plane (real)
+   Slack:  /triage  ·  ⚡ Triage this  ·  @mention  ·  AI Assistant panel  ·  [File] buttons
+                                   │  Socket Mode (WebSocket)
+                                   ▼
+             app/slack_agent.py  ──▶  app/slack_blocks.py  (Block Kit cards)
+                                   │
+                                   ▼
+        ┌──────────────── app/agent.py — agentic RAG ─────────────────┐
+        │  Claude Opus 4.8 tool loop                                  │
+        │   ├─ search_existing_issues ─▶ Qdrant hybrid                │
+        │   │                             (dense HNSW + BM25 → RRF)   │
+        │   └─ submit_triage (strict structured output) ── ends loop  │
+        └────────────────────────────┬────────────────────────────────┘
+                                      ▼
+                Triaged issue ─▶ GitHub (private-repo capable)  or  Plane
 
-GitHub repo ─▶ /api/ingest ─▶ issues + markdown docs ─▶ chunk ─▶ Voyage embeddings ─▶ Qdrant
-Closed issues ─▶ Agent ─▶ Release notes (Markdown)
+        Same engine also published over MCP:  app/mcp_server.py
+        KB seeded via web console:  GitHub issues + docs ─▶ chunk ─▶ embed ─▶ Qdrant
 ```
+
+A rendered version is in [`architecture.html`](architecture.html) (open in a browser).
 
 ---
 
-## Quick start
+## MCP server (standalone)
 
 ```bash
-python -m venv .venv
-.venv\Scripts\activate                 # Windows;  source .venv/bin/activate on macOS/Linux
-pip install -r requirements.txt
-
-cp .env.example .env                   # then edit .env (see keys below)
-uvicorn app.main:app --port 8077
-# open http://127.0.0.1:8077
+python -m app.mcp_server            # stdio transport
 ```
+Tools: `triage_report`, `search_issues`, `file_issue`, `release_notes`. Point any MCP client at it.
 
-The store starts **empty**. In the UI: **(1)** enter your repo and click *Ingest issues*, then
-**(2)** paste a real bug report and *Triage*.
+---
 
-### LLM provider — fallback chain (paid-when-available, free otherwise)
+## The engine
 
-The agent runs on the **first working** provider, auto-selected by a health check and shown in the
-status bar (`LLM: <provider> / <model>`):
+### LLM — fallback chain (paid when available, free otherwise)
+The agent runs on the first working provider, shown in the status bar (`LLM: <provider> / <model>`):
 
-1. **Anthropic (Claude)** — set `ANTHROPIC_API_KEY`. Best quality; native tool use + structured output.
-2. **OpenAI-compatible** — set `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_MODEL`
-   (OpenAI, OpenRouter, Groq, Together, …). Used when Anthropic has no working key.
-3. **Local Ollama (free, no key)** — the fallback when no paid key is present. Setup:
-   ```bash
-   # install from https://ollama.com, then:
-   ollama pull llama3.1        # a tool-capable model (or qwen2.5)
-   ollama serve                # exposes http://localhost:11434
-   ```
-   Defaults: `OLLAMA_BASE_URL=http://localhost:11434/v1`, `OLLAMA_MODEL=llama3.1`.
+1. **Anthropic (Claude)** — `ANTHROPIC_API_KEY`. Best quality; native tool use + structured output.
+2. **OpenAI-compatible** — `OPENAI_COMPAT_BASE_URL` + `OPENAI_COMPAT_API_KEY` + `OPENAI_COMPAT_MODEL`.
+3. **Local Ollama (free, no key)** — `ollama pull llama3.1 && ollama serve`.
 
-Pin one tier with `LLM_PROVIDER=anthropic|openai-compat|ollama`. If none is available, triage returns
-a clear error.
+Pin one with `LLM_PROVIDER=anthropic|openai-compat|ollama`.
 
-> **Cursor note:** a Cursor API key **cannot** be used here. Cursor's API is admin/analytics +
-> cloud-agents only — it is not an LLM chat/completions endpoint, and Cursor blocks routing its own
-> models to external callers. Use the OpenAI-compatible tier for a second paid provider.
+### Embeddings (pluggable)
+`EMBEDDING_PROVIDER=voyage|ollama|hash`. `voyage` = hosted semantic (free tier is rate-limited;
+add a card at dash.voyageai.com for higher limits). `ollama` = free local semantic
+(`ollama pull nomic-embed-text`). `hash` = offline lexical fallback, no API.
+
+### Vector DB — Qdrant (embedded)
+Real vector DB with HNSW ANN, no Docker. Set `QDRANT_URL` / `QDRANT_API_KEY` to use Qdrant Cloud/Docker.
 
 ### Other keys
 
 | Key | Required? | Unlocks |
 |---|---|---|
-| `GITHUB_TOKEN` | For private repos / writes | Ingest private repos at 5,000 req/hr **and** create issues. Public-repo *reads* work tokenless. Fine-grained PAT: **Contents: Read** + **Issues: Read and write**. |
-| `VOYAGE_API_KEY` | Recommended | Real semantic embeddings (`EMBEDDING_PROVIDER=voyage`). Free tier: https://dash.voyageai.com . Or `EMBEDDING_PROVIDER=ollama` for free local embeddings (no key), or `hash` (offline lexical, degraded). |
-| `SLACK_BOT_TOKEN` | Optional | **Read-only.** Pull real messages from a Slack channel to triage (never posts). Bot scopes: `channels:read`, `channels:history`, `users:read`; invite the bot to the channel. |
-| `PLANE_*` (3 vars) | Optional | The "Create in Plane" button files a real **work item** (create-only — never reads/edits/deletes). Otherwise use the GitHub target. |
-
-> **Private repos:** fully supported. Provide a `GITHUB_TOKEN` with access to the repo — the same
-> token both ingests (issues + docs) and creates issues.
+| `GITHUB_TOKEN` | For private repos / writes | Ingest at 5,000 req/hr **and** create issues. PAT: **Contents: Read** + **Issues: Read and write**. |
+| `GITHUB_REPO_URL` | For one-click GitHub filing | Default repo the agent files into (or pass `repo:owner/name` per command). |
+| `PLANE_*` (4 vars) | Optional | The *File to Plane* button files a real work item. |
 
 ---
 
-## Demo script (~2 min)
+## Web console (secondary surface)
 
-1. **Ingest your repo** (box 1). The status bar shows `store: N chunks` (real issues + docs).
-2. **Paste a messy report** (box 2) → **Triage with Claude**. You get a clean title, **P-level
-   priority + reasoning**, reproduction steps, **flagged duplicates** (linked to real ingested
-   issues), and a *Retrieval trace* showing the agent's own search queries (agentic RAG).
-3. **→ Create in GitHub** (or Plane) — files the real issue and links it.
-4. **Generate release notes** — Claude summarizes the repo's resolved/closed issues into Markdown.
-
----
-
-## Vector DB note (Python 3.14)
-
-The roadmap lists Chroma, Qdrant, FAISS, etc. This project uses **Qdrant in embedded local mode**
-(`QdrantClient(path=...)`) — a real vector DB with HNSW ANN, no Docker required. (`chromadb` 1.5.x
-ships Rust bindings that **segfault on Python 3.14**; Qdrant local mode does not.) To use **Qdrant
-Cloud** (free tier) or a Docker container instead, just set `QDRANT_URL` / `QDRANT_API_KEY` — same code.
+The FastAPI app (`uvicorn app.main:app`) is used to **ingest** a repo into the knowledge base and to
+inspect status. It's the admin surface; Slack is the primary one.
 
 ---
 
 ## Project layout
 
 ```
+run_slack.py           Socket Mode entrypoint for the Slack agent
+slack_manifest.yaml    one-paste Slack app definition
+architecture.html      rendered architecture diagram
 app/
-  main.py            FastAPI app, endpoints, serves the UI
-  agent.py           Claude agentic triage loop + release notes
-  vectorstore.py     Qdrant vector DB + hybrid retrieval (dense HNSW + BM25, RRF)
-  embeddings.py      voyage | openai | hash providers
-  chunking.py        heading-aware overlapping chunker
-  config.py          env-driven settings + capability flags
-  models.py          Pydantic schemas
+  slack_agent.py       Slack Bolt app: commands, mention, shortcut, AI assistant, buttons
+  slack_blocks.py      Block Kit triage-card renderers
+  mcp_server.py        MCP server publishing the engine as tools
+  formatting.py        shared issue-body Markdown (web + Slack)
+  agent.py             Claude agentic triage loop + release notes
+  vectorstore.py       Qdrant vector DB + hybrid retrieval (dense HNSW + BM25, RRF)
+  embeddings.py        voyage | ollama | openai | hash providers
+  chunking.py          heading-aware overlapping chunker
+  config.py            env-driven settings + capability flags
+  models.py            Pydantic schemas
+  main.py              FastAPI app (ingestion + web console)
   integrations/
-    github_client.py real GitHub: issues, repo markdown docs, create issue
-    plane_client.py  real Plane issue creation
-  static/index.html  single-file UI (no build step)
+    github_client.py   real GitHub: issues, repo docs, create issue
+    plane_client.py    real Plane issue creation
+    slack_client.py    read-only Slack channel puller (web console)
+  static/index.html    single-file web UI
 ```

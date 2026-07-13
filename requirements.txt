@@ -14,3 +14,12 @@ numpy>=2.0
 # with HNSW ANN, no Docker required, and (unlike chromadb 1.5.x) it does NOT
 # segfault on Python 3.14. Set QDRANT_URL to point at Qdrant Cloud/Docker instead.
 qdrant-client>=1.12
+
+# Slack agent (Socket Mode): the bot that lives inside Slack — slash command,
+# @mention, message shortcut, interactive buttons, and the native AI assistant
+# panel. `python run_slack.py`.
+slack-bolt>=1.20
+
+# MCP server (Model Context Protocol): publishes the triage engine as MCP tools
+# so any MCP client can call it. `python -m app.mcp_server`.
+mcp>=1.2

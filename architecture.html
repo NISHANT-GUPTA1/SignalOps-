@@ -1,0 +1,298 @@
+<title>AI Bug Triage — Architecture</title>
+<style>
+  :root {
+    --ground: #faf7fb;
+    --panel: #ffffff;
+    --panel-2: #f4eef6;
+    --ink: #24132a;
+    --ink-soft: #6b566f;
+    --line: #e4d8e8;
+    --line-strong: #c9b6cf;
+    --aubergine: #4a154b;
+    --slack-green: #157a52;
+    --slack-blue: #1a86ad;
+    --slack-yellow: #a9781a;
+    --slack-red: #c2184a;
+    --core: #4a154b;
+    --core-ink: #ffffff;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --shadow: 0 1px 2px rgba(74,21,75,.06), 0 8px 24px rgba(74,21,75,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #160a18;
+      --panel: #241228;
+      --panel-2: #2e1633;
+      --ink: #f3e9f5;
+      --ink-soft: #b699bd;
+      --line: #3a2340;
+      --line-strong: #543058;
+      --aubergine: #e6b9e8;
+      --slack-green: #4bd6a0;
+      --slack-blue: #63d0f2;
+      --slack-yellow: #ecb22e;
+      --slack-red: #ff6690;
+      --core: #611a63;
+      --core-ink: #ffffff;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #faf7fb; --panel: #ffffff; --panel-2: #f4eef6; --ink: #24132a;
+    --ink-soft: #6b566f; --line: #e4d8e8; --line-strong: #c9b6cf; --aubergine: #4a154b;
+    --slack-green: #157a52; --slack-blue: #1a86ad; --slack-yellow: #a9781a; --slack-red: #c2184a;
+    --core: #4a154b; --core-ink: #ffffff; --shadow: 0 1px 2px rgba(74,21,75,.06), 0 8px 24px rgba(74,21,75,.06);
+  }
+  :root[data-theme="dark"] {
+    --ground: #160a18; --panel: #241228; --panel-2: #2e1633; --ink: #f3e9f5;
+    --ink-soft: #b699bd; --line: #3a2340; --line-strong: #543058; --aubergine: #e6b9e8;
+    --slack-green: #4bd6a0; --slack-blue: #63d0f2; --slack-yellow: #ecb22e; --slack-red: #ff6690;
+    --core: #611a63; --core-ink: #ffffff; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: var(--sans); line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 40px 24px 56px; }
+
+  header { margin-bottom: 30px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 0 0 8px;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 38px); margin: 0 0 6px; letter-spacing: -.02em;
+    text-wrap: balance; font-weight: 700;
+  }
+  .sub { margin: 0; color: var(--ink-soft); font-size: 16px; max-width: 60ch; }
+  .badges { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600;
+    padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line-strong);
+    background: var(--panel);
+  }
+  .badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--slack-green); }
+  .badge.mcp::before { background: var(--slack-blue); }
+
+  .flow { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+
+  .stage-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 0 0 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .stage-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px; box-shadow: var(--shadow);
+  }
+
+  .surfaces { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 720px) { .surfaces { grid-template-columns: repeat(2, 1fr); } }
+  .surface {
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel);
+    border-top: 3px solid var(--sc, var(--aubergine));
+  }
+  .surface .k { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .surface .d { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+  .s-triage { --sc: var(--slack-green); }
+  .s-shortcut { --sc: var(--slack-yellow); }
+  .s-mention { --sc: var(--slack-blue); }
+  .s-panel { --sc: var(--slack-red); }
+
+  .connector {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 10px 0; color: var(--ink-soft);
+  }
+  .connector .rail { width: 2px; height: 16px; background: var(--line-strong); }
+  .connector .lbl {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-soft);
+    background: var(--ground); padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px;
+  }
+  .connector .arrow { color: var(--line-strong); font-size: 13px; line-height: 1; }
+
+  .node-title { font-size: 15px; font-weight: 700; margin: 0; }
+  .node-sub { font-size: 13px; color: var(--ink-soft); margin: 3px 0 0; }
+  .files { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .files span { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; }
+
+  /* core engine + mcp side branch */
+  .core-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; align-items: stretch; }
+  @media (max-width: 720px) { .core-row { grid-template-columns: 1fr; } }
+
+  .core {
+    background: var(--core); color: var(--core-ink); border: 1px solid var(--core);
+    border-radius: 14px; padding: 20px; box-shadow: var(--shadow);
+  }
+  .core .node-title { color: var(--core-ink); }
+  .core .node-sub { color: rgba(255,255,255,.72); }
+  .tool {
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16);
+    border-radius: 10px; padding: 12px 14px; margin-top: 12px;
+  }
+  .tool .tk { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .tool .td { font-size: 12.5px; color: rgba(255,255,255,.75); margin-top: 3px; }
+
+  .mcp {
+    border: 1px dashed var(--line-strong); border-radius: 14px; padding: 18px 20px;
+    background: var(--panel-2); display: flex; flex-direction: column;
+  }
+  .mcp .node-title { color: var(--slack-blue); }
+  .mcp .tools { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .mcp .tools span { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  .mcp .foot { font-size: 12px; color: var(--ink-soft); margin-top: auto; padding-top: 12px; }
+
+  .outputs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .out { border: 1px solid var(--line); border-left: 3px solid var(--slack-green); border-radius: 12px; padding: 14px 16px; background: var(--panel); }
+  .out.plane { border-left-color: var(--slack-blue); }
+  .out .k { font-weight: 700; font-size: 14px; }
+  .out .d { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; }
+
+  /* ingestion strip */
+  .ingest { margin-top: 30px; }
+  .pipe { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .pipe .step {
+    flex: 1; min-width: 120px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px;
+  }
+  .pipe .step .k { font-size: 13px; font-weight: 600; }
+  .pipe .step .d { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-top: 3px; }
+  .pipe .sep { display: flex; align-items: center; padding: 0 8px; color: var(--line-strong); font-size: 18px; }
+  @media (max-width: 720px) { .pipe .sep { display: none; } .pipe { gap: 8px; } }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-soft); align-items: center; }
+  .prio { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .p0 { background: var(--slack-red); } .p1 { background: #e8863b; }
+  .p2 { background: var(--slack-yellow); } .p3 { background: var(--slack-green); }
+
+  .foot-note { margin-top: 24px; font-size: 12px; color: var(--ink-soft); font-family: var(--mono); }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Slack Agent Builder Challenge · New Slack Agent</p>
+    <h1>AI Bug Triage — Architecture</h1>
+    <p class="sub">A Slack-native agentic-RAG agent: messy report in, clean prioritized &amp; de-duplicated issue out — grounded in your team's real history, filed with one click.</p>
+    <div class="badges">
+      <span class="badge">Slack AI Assistant</span>
+      <span class="badge mcp">MCP Server</span>
+    </div>
+  </header>
+
+  <div class="flow">
+    <!-- SLACK -->
+    <p class="stage-label">Slack — the front door</p>
+    <div class="surfaces">
+      <div class="surface s-triage">
+        <div class="k">/triage</div>
+        <div class="d">Slash command</div>
+      </div>
+      <div class="surface s-shortcut">
+        <div class="k">⚡ Triage this</div>
+        <div class="d">Message shortcut</div>
+      </div>
+      <div class="surface s-mention">
+        <div class="k">@BugTriage</div>
+        <div class="d">Channel mention</div>
+      </div>
+      <div class="surface s-panel">
+        <div class="k">AI Assistant</div>
+        <div class="d">Native agent panel</div>
+      </div>
+    </div>
+
+    <div class="connector">
+      <div class="rail"></div>
+      <div class="lbl">Socket Mode · WebSocket</div>
+      <div class="arrow">▼</div>
+    </div>
+
+    <!-- BOLT -->
+    <div class="card">
+      <p class="node-title">Slack Bolt app</p>
+      <p class="node-sub">Handles commands, events, the assistant panel &amp; interactive <em>File</em> buttons; renders Block Kit triage cards.</p>
+      <div class="files"><span>app/slack_agent.py</span><span>app/slack_blocks.py</span></div>
+    </div>
+
+    <div class="connector">
+      <div class="rail"></div>
+      <div class="arrow">▼</div>
+    </div>
+
+    <!-- CORE + MCP -->
+    <p class="stage-label">Agentic-RAG engine — the brain</p>
+    <div class="core-row">
+      <div class="core">
+        <p class="node-title">Claude Opus 4.8 · agentic tool loop</p>
+        <p class="node-sub">The model issues its own searches (query expansion) to hunt duplicates, then emits a strict structured triage.</p>
+        <div class="tool">
+          <div class="tk">search_existing_issues()</div>
+          <div class="td">Qdrant hybrid retrieval — dense HNSW + BM25, fused by RRF</div>
+        </div>
+        <div class="tool">
+          <div class="tk">submit_triage()</div>
+          <div class="td">Strict structured output — title, P0–P3 + reason, severity, repro steps, duplicates</div>
+        </div>
+      </div>
+
+      <div class="mcp">
+        <p class="node-title">MCP server</p>
+        <p class="node-sub" style="color:var(--ink-soft)">Same engine, published over Model Context Protocol for any MCP client.</p>
+        <div class="tools">
+          <span>triage_report</span>
+          <span>search_issues</span>
+          <span>file_issue</span>
+          <span>release_notes</span>
+        </div>
+        <div class="foot">app/mcp_server.py</div>
+      </div>
+    </div>
+
+    <div class="connector">
+      <div class="rail"></div>
+      <div class="lbl">Triaged issue</div>
+      <div class="arrow">▼</div>
+    </div>
+
+    <!-- OUTPUTS -->
+    <div class="outputs">
+      <div class="out github">
+        <div class="k">GitHub</div>
+        <div class="d">Real issue creation — private-repo capable</div>
+      </div>
+      <div class="out plane">
+        <div class="k">Plane</div>
+        <div class="d">Engineering board work items</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- INGESTION -->
+  <div class="ingest">
+    <p class="stage-label">Knowledge base — seeded from a real repo (no seed data)</p>
+    <div class="pipe">
+      <div class="step"><div class="k">GitHub issues + docs</div><div class="d">source</div></div>
+      <div class="sep">→</div>
+      <div class="step"><div class="k">Chunk</div><div class="d">app/chunking.py</div></div>
+      <div class="sep">→</div>
+      <div class="step"><div class="k">Embed</div><div class="d">voyage · ollama · lexical</div></div>
+      <div class="sep">→</div>
+      <div class="step"><div class="k">Qdrant index</div><div class="d">475 chunks · HNSW</div></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span>Priority coding:</span>
+    <span class="prio"><span class="dot p0"></span>P0 outage</span>
+    <span class="prio"><span class="dot p1"></span>P1 major</span>
+    <span class="prio"><span class="dot p2"></span>P2 limited</span>
+    <span class="prio"><span class="dot p3"></span>P3 minor</span>
+  </div>
+
+  <p class="foot-note">Slack Bolt · Socket Mode · Slack AI Assistant · MCP · Claude Opus 4.8 · Qdrant · BM25 + RRF · FastAPI · Python</p>
+</div>

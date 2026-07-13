@@ -46,6 +46,17 @@ class Settings:
 
     # Slack (read-only): a Bot token (xoxb-...) to pull channel messages.
     slack_bot_token: str = _get("SLACK_BOT_TOKEN")
+    # Slack AGENT (read/write, Socket Mode): the bot posts triage cards, runs the
+    # /triage command, the "Triage this" message shortcut, @mentions and the native
+    # AI assistant panel. Needs a bot token (xoxb-, above) + an app-level token
+    # (xapp-, with connections:write) for Socket Mode.
+    slack_app_token: str = _get("SLACK_APP_TOKEN")
+    slack_signing_secret: str = _get("SLACK_SIGNING_SECRET")  # only for HTTP mode
+    # Default repo the Slack agent files issues into / draws release notes from.
+    # Accepts 'owner/repo' or a full GitHub URL. Users can override per-command.
+    default_repo_url: str = _get("GITHUB_REPO_URL")
+    # Channel id the /release-notes digest posts to (optional).
+    slack_digest_channel: str = _get("SLACK_DIGEST_CHANNEL")
 
     # Plane engineering board (real). PLANE_BASE_URL points at a self-hosted
     # instance; defaults to Plane Cloud. Trailing slash is stripped on read.
@@ -68,6 +79,21 @@ class Settings:
     @property
     def has_slack(self) -> bool:
         return bool(self.slack_bot_token)
+
+    @property
+    def slack_agent_ready(self) -> bool:
+        """Socket-Mode agent needs a bot token AND an app-level token."""
+        return bool(self.slack_bot_token and self.slack_app_token)
+
+    @property
+    def default_target(self) -> str:
+        """Where the Slack agent files by default: github if a repo+token exist,
+        else plane if configured, else github (which will prompt for a repo)."""
+        if self.default_repo_url and self.github_token:
+            return "github"
+        if self.plane_is_live:
+            return "plane"
+        return "github"
 
     @property
     def plane_is_live(self) -> bool:
